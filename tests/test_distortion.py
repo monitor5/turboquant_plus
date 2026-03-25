@@ -50,8 +50,8 @@ class TestMSEDistortionBounds:
             x = rng.standard_normal(d)
             x = x / np.linalg.norm(x)
 
-            idx = pq.quantize(x)
-            x_hat = pq.dequantize(idx)
+            idx, norms = pq.quantize(x)
+            x_hat = pq.dequantize(idx, norms)
             mses.append(np.mean((x - x_hat) ** 2))
 
         avg_mse = np.mean(mses)
@@ -147,8 +147,8 @@ class TestDistortionScaling:
             pq = PolarQuant(d=d, bit_width=b, seed=42)
             total = 0.0
             for x in X:
-                idx = pq.quantize(x)
-                x_hat = pq.dequantize(idx)
+                idx, norms = pq.quantize(x)
+                x_hat = pq.dequantize(idx, norms)
                 total += np.mean((x - x_hat) ** 2)
             mses[b] = total / len(X)
 
@@ -171,8 +171,10 @@ class TestDistortionScaling:
         pq = PolarQuant(d=d, bit_width=2, seed=42)
         pq_errors = []
         for x, y in pairs:
-            x_hat = pq.dequantize(pq.quantize(x))
-            y_hat = pq.dequantize(pq.quantize(y))
+            idx_x, n_x = pq.quantize(x)
+            idx_y, n_y = pq.quantize(y)
+            x_hat = pq.dequantize(idx_x, n_x)
+            y_hat = pq.dequantize(idx_y, n_y)
             pq_errors.append(abs(np.dot(x, y) - np.dot(x_hat, y_hat)))
 
         # TurboQuant 2-bit (PolarQuant 1-bit + QJL 1-bit)

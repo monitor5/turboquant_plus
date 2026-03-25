@@ -139,8 +139,8 @@ class TestTurboQuantMSE:
         x = rng.standard_normal(d)
         x = x / np.linalg.norm(x)
 
-        indices = tq.quantize(x)
-        x_hat = tq.dequantize(indices)
+        indices, norms = tq.quantize(x)
+        x_hat = tq.dequantize(indices, norms)
 
         mse = np.mean((x - x_hat) ** 2)
         # 3-bit MSE-only should be better than paper's 3-bit TurboQuant MSE

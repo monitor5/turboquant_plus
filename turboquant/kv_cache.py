@@ -18,8 +18,9 @@ class CompressedKVCache:
     """Container for a compressed KV cache."""
     # Per-layer, per-head compressed K vectors
     k_compressed: list[list[CompressedVector]] = field(default_factory=list)
-    # Per-layer, per-head compressed V indices (MSE-only)
+    # Per-layer, per-head compressed V (indices + norms)
     v_indices: list[list[np.ndarray]] = field(default_factory=list)
+    v_norms: list[list[np.ndarray]] = field(default_factory=list)
 
     num_layers: int = 0
     num_heads: int = 0
@@ -94,20 +95,23 @@ class KVCacheCompressor:
 
         for layer in range(num_layers):
             k_layer = []
-            v_layer = []
+            v_layer_idx = []
+            v_layer_norms = []
             for head in range(num_heads):
                 # K: batch quantize all seq positions for this layer/head
                 k_vecs = k_cache[layer, head]  # (seq_len, head_dim)
                 k_compressed = self.k_quantizer.quantize(k_vecs)
                 k_layer.append(k_compressed)
 
-                # V: MSE quantize
+                # V: MSE quantize (returns indices + norms)
                 v_vecs = v_cache[layer, head]  # (seq_len, head_dim)
-                v_indices = self.v_quantizer.quantize(v_vecs)
-                v_layer.append(v_indices)
+                v_indices, v_norms = self.v_quantizer.quantize(v_vecs)
+                v_layer_idx.append(v_indices)
+                v_layer_norms.append(v_norms)
 
             result.k_compressed.append(k_layer)
-            result.v_indices.append(v_layer)
+            result.v_indices.append(v_layer_idx)
+            result.v_norms.append(v_layer_norms)
 
         return result
 
@@ -129,7 +133,8 @@ class KVCacheCompressor:
                     compressed.k_compressed[layer][head]
                 )
                 v_cache[layer, head] = self.v_quantizer.dequantize(
-                    compressed.v_indices[layer][head]
+                    compressed.v_indices[layer][head],
+                    compressed.v_norms[layer][head],
                 )
 
         return k_cache, v_cache

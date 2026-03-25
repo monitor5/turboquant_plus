@@ -20,6 +20,7 @@ from turboquant.qjl import QJL
 class CompressedVector:
     """Container for a TurboQuant-compressed vector."""
     mse_indices: np.ndarray   # (d,) or (batch, d) — PolarQuant indices, (b-1)-bit integers
+    vector_norms: np.ndarray  # scalar or (batch,) — original ||x||_2 for rescaling
     qjl_signs: np.ndarray     # (d,) or (batch, d) — QJL sign bits, int8 {+1, -1}
     residual_norms: np.ndarray # scalar or (batch,) — ||residual||_2
     bit_width: int             # total bits per coordinate
@@ -68,14 +69,15 @@ class TurboQuant:
         Returns:
             CompressedVector containing indices, signs, and norms.
         """
-        # Stage 1: PolarQuant
-        mse_indices, residual = self.polar_quant.quantize_and_residual(x)
+        # Stage 1: PolarQuant (with norm extraction)
+        mse_indices, vector_norms, residual = self.polar_quant.quantize_and_residual(x)
 
         # Stage 2: QJL on residual
         qjl_signs, residual_norms = self.qjl.quantize(residual)
 
         return CompressedVector(
             mse_indices=mse_indices,
+            vector_norms=vector_norms,
             qjl_signs=qjl_signs,
             residual_norms=residual_norms,
             bit_width=self.bit_width,
@@ -90,8 +92,8 @@ class TurboQuant:
         Returns:
             Reconstructed vector(s), same shape as original.
         """
-        # Stage 1: PolarQuant reconstruction
-        x_mse = self.polar_quant.dequantize(compressed.mse_indices)
+        # Stage 1: PolarQuant reconstruction (with norm rescaling)
+        x_mse = self.polar_quant.dequantize(compressed.mse_indices, compressed.vector_norms)
 
         # Stage 2: QJL residual reconstruction
         x_qjl = self.qjl.dequantize(compressed.qjl_signs, compressed.residual_norms)
@@ -136,8 +138,9 @@ class TurboQuantMSE:
         self.bit_width = bit_width
         self.polar_quant = PolarQuant(d, bit_width=bit_width, seed=seed)
 
-    def quantize(self, x: np.ndarray) -> np.ndarray:
+    def quantize(self, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Returns (indices, norms)."""
         return self.polar_quant.quantize(x)
 
-    def dequantize(self, indices: np.ndarray) -> np.ndarray:
-        return self.polar_quant.dequantize(indices)
+    def dequantize(self, indices: np.ndarray, norms: np.ndarray) -> np.ndarray:
+        return self.polar_quant.dequantize(indices, norms)

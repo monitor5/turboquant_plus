@@ -13,8 +13,7 @@ class TestPolarQuantRoundTrip:
     @pytest.mark.parametrize("d", [64, 128, 256])
     def test_round_trip_mse_within_bounds(self, bit_width, d):
         """MSE distortion should be within paper's bounds (Table 2)."""
-        # Paper bounds (upper, for normalized vectors)
-        expected_mse = {1: 0.36, 2: 0.117, 3: 0.03, 4: 0.009}
+        expected_mse = {1: 0.36, 2: 0.117, 3: 0.03}
 
         pq = PolarQuant(d=d, bit_width=bit_width, seed=42)
         rng = np.random.default_rng(99)
@@ -23,32 +22,50 @@ class TestPolarQuantRoundTrip:
         mse_total = 0.0
         for _ in range(n_samples):
             x = rng.standard_normal(d)
-            x = x / np.linalg.norm(x)  # unit vector
+            x = x / np.linalg.norm(x)
 
-            indices = pq.quantize(x)
-            x_hat = pq.dequantize(indices)
+            indices, norms = pq.quantize(x)
+            x_hat = pq.dequantize(indices, norms)
             mse_total += np.mean((x - x_hat) ** 2)
 
         avg_mse = mse_total / n_samples
-        # Allow 2× slack over paper bound (we're using finite d, paper assumes d→∞)
         assert avg_mse < expected_mse[bit_width] * 2.0, (
             f"MSE {avg_mse:.4f} exceeds 2× paper bound {expected_mse[bit_width]} "
             f"at d={d}, b={bit_width}"
         )
 
     def test_zero_vector(self):
-        """Zero vector quantizes to small values (centroids are non-zero).
-
-        PolarQuant maps rotated zeros to nearest centroids, so reconstruction
-        won't be exactly zero — but the MSE should be small relative to unit vectors.
-        """
+        """Zero vector should reconstruct to zero (norm=0 → rescale to 0)."""
         pq = PolarQuant(d=128, bit_width=2, seed=42)
         x = np.zeros(128)
-        indices = pq.quantize(x)
-        x_hat = pq.dequantize(indices)
-        # Reconstruction of zero will be non-zero (centroid quantization),
-        # but norm should be small
-        assert np.linalg.norm(x_hat) < 0.5
+        indices, norms = pq.quantize(x)
+        x_hat = pq.dequantize(indices, norms)
+        np.testing.assert_allclose(x_hat, 0.0, atol=1e-15)
+
+    def test_non_unit_norm_vectors(self):
+        """CRITICAL: PolarQuant must work on non-unit-norm vectors (real KV cache).
+
+        Roast review found this was the biggest bug — codebook is calibrated for
+        unit norm, but real KV tensors have norms ~10-50.
+        """
+        d = 128
+        pq = PolarQuant(d=d, bit_width=3, seed=42)
+        rng = np.random.default_rng(42)
+
+        for scale in [0.01, 1.0, 10.0, 50.0, 100.0]:
+            x = rng.standard_normal(d) * scale
+
+            indices, norms = pq.quantize(x)
+            x_hat = pq.dequantize(indices, norms)
+
+            # Relative MSE should be bounded regardless of scale
+            # (same as unit-norm MSE since we extract/rescale norms)
+            norm_sq_per_d = np.linalg.norm(x) ** 2 / d
+            if norm_sq_per_d > 1e-10:
+                relative_mse = np.mean((x - x_hat) ** 2) / norm_sq_per_d
+                assert relative_mse < 0.5, (
+                    f"Relative MSE {relative_mse:.4f} too high at scale={scale}"
+                )
 
     def test_deterministic(self):
         """Same seed, same input → same output."""
@@ -58,9 +75,10 @@ class TestPolarQuantRoundTrip:
         pq1 = PolarQuant(d=d, bit_width=2, seed=42)
         pq2 = PolarQuant(d=d, bit_width=2, seed=42)
 
-        idx1 = pq1.quantize(x)
-        idx2 = pq2.quantize(x)
+        idx1, n1 = pq1.quantize(x)
+        idx2, n2 = pq2.quantize(x)
         np.testing.assert_array_equal(idx1, idx2)
+        assert n1 == n2
 
     def test_batch_matches_single(self):
         """Batch quantization should match single-vector quantization."""
@@ -70,14 +88,12 @@ class TestPolarQuantRoundTrip:
 
         X = rng.standard_normal((10, d))
 
-        # Batch
-        batch_indices = pq.quantize(X)
-        batch_recon = pq.dequantize(batch_indices)
+        batch_indices, batch_norms = pq.quantize(X)
+        batch_recon = pq.dequantize(batch_indices, batch_norms)
 
-        # Single
         for i in range(10):
-            single_idx = pq.quantize(X[i])
-            single_recon = pq.dequantize(single_idx)
+            single_idx, single_norm = pq.quantize(X[i])
+            single_recon = pq.dequantize(single_idx, single_norm)
             np.testing.assert_array_equal(batch_indices[i], single_idx)
             np.testing.assert_allclose(batch_recon[i], single_recon, atol=1e-12)
 
@@ -88,7 +104,7 @@ class TestPolarQuantRoundTrip:
         rng = np.random.default_rng(5)
         x = rng.standard_normal(d)
 
-        indices = pq.quantize(x)
+        indices, _ = pq.quantize(x)
         assert indices.min() >= 0
         assert indices.max() < (1 << 3)
 
@@ -103,7 +119,7 @@ class TestPolarQuantResidual:
         rng = np.random.default_rng(3)
         x = rng.standard_normal(d)
 
-        indices, residual = pq.quantize_and_residual(x)
-        x_hat = pq.dequantize(indices)
+        indices, norms, residual = pq.quantize_and_residual(x)
+        x_hat = pq.dequantize(indices, norms)
 
         np.testing.assert_allclose(residual, x - x_hat, atol=1e-12)
