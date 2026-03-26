@@ -820,7 +820,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Base port for llama-server (default: %(default)s)",
     )
     parser.add_argument(
-        "--output-dir",
+        "--output-dir", "-o",
         default=None,
         help="Directory for results files (default: ./niah_results/)",
     )
