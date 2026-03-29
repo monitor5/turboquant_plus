@@ -73,14 +73,14 @@ With the hardware bug eliminated, we tested whether raising K precision alone co
 | K | V | PPL (Qwen2.5-7B Q4_K_M) | Notes |
 |---|---|--------------------------|-------|
 | q8_0 | q8_0 | 6.58 | baseline |
-| q8_0 | turbo3 | 6.68 | +1.6% — rescued! |
-| q8_0 | turbo4 | 45393 | NaN — broken |
+| q8_0 | turbo3 | 6.68 | +1.6% — rescued! (pre-fix number) |
+| q8_0 | turbo4 | 45393 | NaN — broken (missing kernel) |
 | turbo4 | turbo3 | 257 | still bad |
 | turbo3 | turbo3 | 3556 | catastrophic |
 
-The q8_0-K + turbo3-V result (+1.6%) was the first evidence that K precision is the dominant quality factor and V can be aggressively compressed.
+The q8_0-K + turbo3-V result (+1.6%) was the first evidence that K precision is the dominant quality factor and V can be aggressively compressed. This number happened to work via an accidental fallback path — the proper kernel didn't exist yet.
 
-But q8_0-K + turbo4-V produced NaN, which was confusing since turbo4 has MORE precision than turbo3.
+But q8_0-K + turbo4-V produced NaN, which was confusing since turbo4 has MORE precision than turbo3. This turned out to be the key clue pointing to the missing kernel bug.
 
 ### Phase 4: The Missing Kernel Bug
 
@@ -92,6 +92,8 @@ The asymmetric K/V implementation we had just shipped only added turbo × turbo 
 - Produced NaN for turbo4-V (different nl parameter, no valid fallback)
 
 **Fix:** Added 150 new kernel instantiations (90 non-vec + 60 vec) covering all q8_0 × turbo pairs in both directions, for all supported head dimensions. Updated the gatekeeper in `ggml-metal-device.m` and the assertion in `ggml-metal-ops.cpp` to allow q8_0 × turbo mixed pairs.
+
+Note: the earlier turbo × turbo asymmetric work (90 instantiations) was also part of this effort. The total asymmetric addition across both phases was 240 new kernel instantiations. All FA pipeline names were also migrated to a `k{type}_v{type}` format to avoid underscore ambiguity in type names like `q4_0`.
 
 ### Phase 5: Full Rescue Validated
 
@@ -108,20 +110,28 @@ With proper kernel instantiations, all q8_0-K + turbo-V configurations work corr
 
 **phi-4-Q8_0 (control model):**
 
-| K | V | PPL | vs q8_0 baseline |
-|---|---|------|-----------------|
-| q8_0 | q8_0 | 4.69 | — |
-| q8_0 | turbo4 | 5.23 | +11.6% |
-| q8_0 | turbo3 | 5.24 | +11.7% |
+| K | V | PPL | vs q8_0 baseline (4.69) |
+|---|---|------|------------------------|
+| q8_0 | turbo4 | 4.70 | +0.3% |
+| q8_0 | turbo3 | 4.74 | +1.1% |
+| q8_0 | turbo2 | 4.84 | +3.1% |
+| turbo4 | turbo4 | 4.77 | +1.7% |
+| turbo3 | turbo3 | 4.89 | +4.2% |
 
 **Qwen3.5-35B-A3B MoE (large model, Q8_0 weights):**
 
 | K | V | PPL |
 |---|---|------|
 | turbo3 | turbo3 | 5.13 |
-| turbo4 | turbo4 | ~4.8 |
+| turbo4 | turbo4 | 5.08 |
 
-Large models with Q8_0 weights continue to work fine with symmetric turbo.
+**Mistral-Small-24B-Instruct (Q4_K_M weights — symmetric turbo works at this size):**
+
+| K | V | PPL |
+|---|---|------|
+| turbo3 | turbo3 | 4.99 |
+
+Large models and some model families tolerate symmetric turbo even with Q4_K_M weights. Not all Q4_K_M models are sensitive to the quantization stacking.
 
 ## Key Findings
 
@@ -169,17 +179,19 @@ The turbo4-V NaN was caused by a missing `kq8_0_vturbo4` kernel, not an algorith
 
 ## Recommendations
 
-### For users with Q4_K_M models
-Use `-ctk q8_0 -ctv turbo3` (or turbo4/turbo2 depending on quality/compression preference). This gives near-baseline quality with V cache compression.
+### For models sensitive to symmetric turbo (tested: Qwen2.5-7B Q4_K_M)
+Use `-ctk q8_0 -ctv turbo4` (best quality) or `-ctk q8_0 -ctv turbo3` (more compression). This gives near-baseline quality with V cache compression.
 
-### For users with Q8_0 or higher weight quant
+### For Q8_0 or higher weight quant
 Symmetric turbo works fine: `-ctk turbo3 -ctv turbo3` or `-ctk turbo4 -ctv turbo4`.
 
-### For maximum compression on Q4_K_M
-`-ctk q8_0 -ctv turbo2` gives 3.2x V compression with +5.1% PPL — usable for long-context scenarios where memory is the constraint.
+### For Q4_K_M on larger or less sensitive models
+Symmetric turbo may work — Mistral-24B Q4_K_M gives PPL 4.99 with turbo3/turbo3. Validate on your specific model. Fall back to asymmetric if quality degrades.
 
-### Default policy suggestion
-Auto-detect weight quantization level from GGUF metadata. If Q4_K_M or lower, default to `-ctk q8_0 -ctv turbo3` instead of symmetric turbo.
+### For maximum V compression
+`-ctk q8_0 -ctv turbo2` gives 3.2x V compression with +5.1% PPL. turbo2-V showed promising results but has less validation than turbo4-V and turbo3-V. Treat as experimental.
+
+See [Configuration Recommendations](turboquant-recommendations.md) for the full tested matrix.
 
 ## Acknowledgments
 
