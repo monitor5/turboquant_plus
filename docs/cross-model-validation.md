@@ -125,3 +125,11 @@ Excellent results — turbo4 within 0.5% of q8_0 on Mistral.
 - Decode: llama-bench tg128
 - NIAH: 3 positions at 8K (if supported)
 - turbo3/turbo4 may fail on models with non-128 head_dim (known limitation, #13)
+
+## TODO
+
+- [ ] Mixtral 8x7B quick bench (model downloaded + verified loading, PPL 3.31 on q8_0)
+- [ ] Decode scaling tests: Llama 70B, Gemma 2, Mixtral at 4K/8K/16K/32K context lengths
+- [ ] 50-chunk 32K sparse V ON/OFF on Llama 70B (long run, overnight)
+- [ ] Investigate Gemma 2 turbo4 outlier (turbo4 slightly worse than turbo3, only model showing this)
+- [ ] Non-128 head_dim padding fix (prefer padding over q8_0 fallback, see signalnine #13)
