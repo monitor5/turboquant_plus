@@ -36,6 +36,15 @@ LLAMA_DIR="${2:-$HOME/local_llms/llama.cpp}"
 BUILD="${LLAMA_DIR}/build-turbo/bin"
 WIKI="${LLAMA_DIR}/wikitext-2-raw/wiki.test.raw"
 
+# Multi-GPU tensor split — set via env var, e.g.:
+#   TENSOR_SPLIT=0.63,0.37 bash turbo-quick-bench.sh model.gguf
+# For RTX 5060 Ti 16GB + RTX 3060 12GB (monitors on 3060, ~9GB free): TENSOR_SPLIT=0.63,0.37
+TENSOR_SPLIT="${TENSOR_SPLIT:-}"
+TS_ARGS=""
+if [ -n "$TENSOR_SPLIT" ]; then
+    TS_ARGS="-ts $TENSOR_SPLIT"
+fi
+
 # Validate
 [ -f "$MODEL" ] || { echo "ERROR: Model not found: $MODEL"; exit 1; }
 [ -f "$BUILD/llama-perplexity" ] || { echo "ERROR: llama-perplexity not found in $BUILD"; exit 1; }
@@ -123,7 +132,8 @@ if [ -z "$SKIP_PPL" ]; then
     echo "--- PPL (c=512, 8 chunks) ---"
     for ct in q8_0 turbo3 turbo4; do
         PPL=$($BUILD/llama-perplexity -m "$MODEL" -f "$WIKI" -c 512 \
-            -ctk $ct -ctv $ct -fa on --chunks 8 -ngl 99 2>&1 | \
+            -ctk $ct -ctv $ct -fa on --chunks 8 -ngl 99 \
+            ${TENSOR_SPLIT:+--tensor-split "$TENSOR_SPLIT"} 2>&1 | \
             grep "Final estimate" | awk '{print $5}')
 
         if [ -z "$PPL" ]; then
@@ -147,7 +157,7 @@ fi
 echo "--- Decode Speed (tg128) ---"
 for ct in q8_0 turbo3 turbo4; do
     SPEED=$($BUILD/llama-bench -m "$MODEL" -ctk $ct -ctv $ct \
-        -fa 1 -ngl 99 -p 0 -n 128 2>&1 | \
+        -fa 1 -ngl 99 $TS_ARGS -p 0 -n 128 2>&1 | \
         grep "tg128" | awk -F'|' '{print $(NF-1)}' | awk '{print $1}')
 
     if [ -z "$SPEED" ]; then

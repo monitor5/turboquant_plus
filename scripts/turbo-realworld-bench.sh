@@ -13,11 +13,15 @@
 set -e
 
 LLAMA=${LLAMA:-~/local_llms/llama.cpp/build-turbo/bin}
-MODEL=${MODEL:-~/local_llms/models/Qwen3.5-35B-A3B-Q8_0.gguf}
+MODEL=${MODEL:-~/local_llms/models/Qwen3.5-27B-Q5_K_M.gguf}
 PDF=${1:-~/Downloads/70_Pages_of_Fitness_Notes_-_A_Collection.pdf}
 PORT_BASE=${PORT_BASE:-18100}
 THREADS=${THREADS:-6}
 MAX_TOKENS=${MAX_TOKENS:-64}
+
+# Multi-GPU tensor split (RTX 5060 Ti 16GB + RTX 3060 12GB with monitors ~9GB free)
+# Override via env: TENSOR_SPLIT=0.63,0.37 bash turbo-realworld-bench.sh
+TENSOR_SPLIT="${TENSOR_SPLIT:-0.63,0.37}"
 
 if [ ! -f "$PDF" ]; then
     echo "ERROR: PDF not found at $PDF"
@@ -77,6 +81,7 @@ for CACHE_TYPE in turbo3 q8_0; do
     $LLAMA/llama-server \
         -m $MODEL -ngl 99 -c 65536 -fa on \
         --cache-type-k $CACHE_TYPE --cache-type-v $CACHE_TYPE \
+        --tensor-split $TENSOR_SPLIT \
         --host 127.0.0.1 --port $PORT \
         -t $THREADS --no-warmup -np 1 --cache-ram 0 2>/dev/null &
     SERVER_PID=$!
