@@ -1,0 +1,105 @@
+{
+  "diag_version": 5,
+  "timestamp": "",
+  "system": {
+    "platform": "Linux",
+    "os_version": "",
+    "arch": "x86_64",
+    "cpu_brand": "",
+    "cpu_cores_physical": 0,
+    "cpu_cores_logical": 0,
+    "ram_total_gb": 32,
+    "apple_silicon": false,
+    "chip_model": "",
+    "l1_dcache": 0,
+    "l2_cache": 0,
+    "gpu": {
+      "name": "RTX 5060 Ti + RTX 3060",
+      "family": "CUDA",
+      "family_id": 0,
+      "has_tensor": true,
+      "has_unified_memory": false,
+      "has_bfloat": true,
+      "recommended_max_working_set_mb": 24576,
+      "metal_version": "unknown",
+      "cuda_compute_cap": "10.0,8.6",
+      "cuda_vram_mb": 28672
+    }
+  },
+  "_gpu_notes": {
+    "gpu0_rtx5060ti": {
+      "vram_total_mb": 16384,
+      "vram_usable_mb": 15872,
+      "cuda_compute_cap": "10.0",
+      "role": "primary compute"
+    },
+    "gpu1_rtx3060": {
+      "vram_total_mb": 12288,
+      "vram_used_by_displays_mb": 2560,
+      "vram_usable_mb": 9216,
+      "cuda_compute_cap": "8.6",
+      "role": "secondary compute + display output"
+    },
+    "total_usable_vram_mb": 25088,
+    "recommended_tensor_split": "0.63,0.37",
+    "tensor_split_rationale": "5060Ti gets 15.5GB / 24.5GB total = 63%; 3060 gets 9GB / 24.5GB = 37%"
+  },
+  "_ram_notes": {
+    "ram_total_gb": 32,
+    "ram_used_at_idle_gb": 7.1,
+    "ram_free_gb": 24.9
+  },
+  "_model_recommendations": {
+    "qwen35_27b": {
+      "recommended_quant": "Q5_K_M",
+      "quant_size_gb": 20.0,
+      "fits_in_vram": true,
+      "tensor_split": "0.63,0.37",
+      "max_context_turbo4": 131072,
+      "max_context_q8_0": 65536,
+      "kv_cache_recommendation": "turbo4",
+      "kv_cache_at_32k_gb": 1.2,
+      "kv_cache_at_64k_gb": 2.4,
+      "kv_cache_at_128k_gb": 4.8,
+      "notes": [
+        "Q5_K_M (~20GB) fits across both GPUs with ~4.5GB headroom for KV cache",
+        "turbo4 KV cache enables 128K context within VRAM budget",
+        "Q4_K_M (~17GB) fits on 5060 Ti alone but tight; use tensor split for stability",
+        "Q8_0 (~29GB) requires both GPUs at near-capacity; 32K context max recommended"
+      ]
+    }
+  },
+  "_llama_cpp_flags": {
+    "all_layers_to_gpu": "-ngl 99",
+    "flash_attention": "-fa on",
+    "tensor_split": "--tensor-split 0.63,0.37",
+    "recommended_kv_cache": "-ctk turbo4 -ctv turbo4",
+    "example_32k_context": "llama-cli -m Qwen3.5-27B-Q5_K_M.gguf -ngl 99 -fa on --tensor-split 0.63,0.37 -ctk turbo4 -ctv turbo4 -c 32768",
+    "example_128k_context": "llama-cli -m Qwen3.5-27B-Q5_K_M.gguf -ngl 99 -fa on --tensor-split 0.63,0.37 -ctk turbo4 -ctv turbo4 -c 131072"
+  },
+  "_build_instructions": {
+    "cmake_cuda": "cmake -B build -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release",
+    "cmake_build": "cmake --build build -j$(nproc)",
+    "cuda_arch_hint": "GGML_CUDA_FORCE_MMQ=1 may help on Ada/Blackwell (5060 Ti) + Ampere (3060) mixed setups"
+  },
+  "model": {
+    "filename": "",
+    "filesize_bytes": 0,
+    "architecture": "qwen3",
+    "name": "Qwen3.5-27B",
+    "file_type": "Q5_K_M",
+    "model_type": "27B",
+    "params": "27B",
+    "n_layer": 36,
+    "n_head": 32,
+    "n_head_kv": 8,
+    "n_expert": 0,
+    "n_expert_used": 0,
+    "n_ctx_train": 131072,
+    "n_embd": 4096
+  },
+  "benchmarks": [],
+  "ppl_results": [],
+  "load_snapshots": [],
+  "build_commit": ""
+}

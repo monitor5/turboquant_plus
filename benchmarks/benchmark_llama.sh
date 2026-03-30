@@ -5,13 +5,18 @@
 # Copyright 2026 Tom Turney. Licensed under Apache 2.0.
 
 LLAMA_DIR="$HOME/local_llms/llama.cpp"
-MODEL="$HOME/local_llms/models/Qwen3.5-35B-A3B-Q8_0.gguf"
+MODEL="${MODEL:-$HOME/local_llms/models/Qwen3.5-27B-Q5_K_M.gguf}"
 CLI="$LLAMA_DIR/build-turbo/bin/llama-cli"
 RESULTS_FILE="benchmarks/benchmark_results.md"
 
+# Multi-GPU tensor split (RTX 5060 Ti 16GB + RTX 3060 12GB with ~9GB free after monitors)
+# Override via env: TENSOR_SPLIT=0.63,0.37 bash benchmark_llama.sh
+TENSOR_SPLIT="${TENSOR_SPLIT:-0.63,0.37}"
+
 echo "=============================================="
-echo "TurboQuant Benchmark — M5 Max 128GB"
-echo "Model: Qwen 3.5 35B-A3B MoE Q8_0"
+echo "TurboQuant Benchmark — RTX 5060 Ti + RTX 3060"
+echo "Model: $(basename $MODEL)"
+echo "Tensor split: $TENSOR_SPLIT"
 echo "=============================================="
 echo ""
 
@@ -25,6 +30,7 @@ for CACHE_TYPE in "q8_0" "q4_0" "turbo3" "turbo4"; do
     OUTPUT=$($CLI \
         -m "$MODEL" \
         -ngl 99 -fa on \
+        --tensor-split "$TENSOR_SPLIT" \
         -c 2048 \
         -ctk "$CACHE_TYPE" -ctv "$CACHE_TYPE" \
         -n 50 -p "Explain quantum computing in simple terms." \

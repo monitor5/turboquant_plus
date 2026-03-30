@@ -1194,6 +1194,7 @@ def run_bench(
     bench_bin: str,
     model: str,
     env_prefix: str = "",
+    tensor_split: str = "",
 ) -> tuple[str, float]:
     """Run a llama-bench invocation. Returns (stdout, wall_seconds)."""
     log.subsection(label)
@@ -1207,6 +1208,8 @@ def run_bench(
         "-ngl", "99", "-fa", "1",
         "-ctk", ctk, "-ctv", ctv,
     ]
+    if tensor_split:
+        cmd.extend(["-ts", tensor_split])
     # Split extra_args respecting the shell-like splitting
     if extra_args:
         cmd.extend(extra_args.split())
@@ -1234,6 +1237,7 @@ def run_perpl(
     model: str,
     wiki_path: str,
     env_prefix: str = "",
+    tensor_split: str = "",
 ) -> tuple[str, float]:
     """Run llama-perplexity. Returns (stdout, wall_seconds)."""
     log.subsection(label)
@@ -1249,6 +1253,8 @@ def run_perpl(
         "-f", wiki_path,
         "--chunks", str(chunks),
     ]
+    if tensor_split:
+        cmd.extend(["--tensor-split", tensor_split])
 
     env_extra = _parse_env_string(env_prefix)
     start = _epoch()
@@ -1568,6 +1574,7 @@ def section_4_gpu_capabilities(
 
 def section_5_build_validation(
     log: DiagLog, bench_bin: str, cli_bin: str, model: str, llama_dir: str,
+    tensor_split: str = "",
 ) -> None:
     """Section 5: Build validation."""
     log.section("5. BUILD VALIDATION")
@@ -1579,6 +1586,8 @@ def section_5_build_validation(
         "-ctk", "turbo3", "-ctv", "turbo3",
         "-p", "64", "-n", "0", "-r", "1",
     ]
+    if tensor_split:
+        cmd.extend(["-ts", tensor_split])
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         output = result.stdout + result.stderr
@@ -1627,6 +1636,7 @@ def section_5_build_validation(
 
 def section_6_prefill(
     log: DiagLog, bench_bin: str, model: str, display: LiveDisplay,
+    tensor_split: str = "",
 ) -> None:
     """Section 6: Prefill speed."""
     log.section("6. PREFILL SPEED (tok/s)")
@@ -1641,17 +1651,17 @@ def section_6_prefill(
     run_bench(
         "q8_0 prefill (all depths)", "q8_0", "q8_0",
         f"-p {depths_str} -n 0",
-        log, bench_bin, model,
+        log, bench_bin, model, tensor_split=tensor_split,
     )
     run_bench(
         "turbo3 prefill (all depths)", "turbo3", "turbo3",
         f"-p {depths_str} -n 0",
-        log, bench_bin, model,
+        log, bench_bin, model, tensor_split=tensor_split,
     )
     run_bench(
         "turbo3 mode2 prefill (all depths)", "turbo3", "turbo3",
         f"-p {depths_str} -n 0",
-        log, bench_bin, model, env_prefix=MODE2_ENV,
+        log, bench_bin, model, env_prefix=MODE2_ENV, tensor_split=tensor_split,
     )
 
     capture_load("post_prefill", log)
@@ -1660,6 +1670,7 @@ def section_6_prefill(
 def section_7_decode(
     log: DiagLog, bench_bin: str, model: str,
     display: LiveDisplay, anomaly: AnomalyDetector,
+    tensor_split: str = "",
 ) -> None:
     """Section 7: Decode speed — THE CRITICAL TEST."""
     log.section("7. DECODE SPEED (tok/s) \u2014 THE CRITICAL TEST")
@@ -1668,6 +1679,7 @@ def section_7_decode(
     log.write("Known baselines:")
     log.write("  M5 Max: turbo3/q8_0 = 0.92x (short) \u2192 0.72x (48K)")
     log.write("  M1 Max: turbo3/q8_0 = ??? (short) \u2192 0.09x (42K) \u2190 CATASTROPHIC")
+    log.write("  CUDA dual-GPU: constant-cache penalty absent; expect turbo3/q8_0 \u2265 0.90x")
     log.write("")
     log.write("Healthy: ratio stays above 0.70x through 32K")
     log.write("Problem: ratio drops below 0.50x at any depth")
@@ -1689,7 +1701,7 @@ def section_7_decode(
         # q8_0
         output, _ = run_bench(
             f"q8_0 decode ({depth_label})", "q8_0", "q8_0",
-            depth_flag, log, bench_bin, model,
+            depth_flag, log, bench_bin, model, tensor_split=tensor_split,
         )
         results = parse_bench_tps(output)
         for r in results:
@@ -1704,7 +1716,7 @@ def section_7_decode(
         # turbo3
         output, _ = run_bench(
             f"turbo3 decode ({depth_label})", "turbo3", "turbo3",
-            depth_flag, log, bench_bin, model,
+            depth_flag, log, bench_bin, model, tensor_split=tensor_split,
         )
         results = parse_bench_tps(output)
         for r in results:
@@ -1720,6 +1732,7 @@ def section_7_decode(
         run_bench(
             f"turbo3 mode2 decode ({depth_label})", "turbo3", "turbo3",
             depth_flag, log, bench_bin, model, env_prefix=MODE2_ENV,
+            tensor_split=tensor_split,
         )
 
     anomaly.check_thermal()
@@ -1733,6 +1746,7 @@ def section_7_decode(
 def section_8_stress_test(
     log: DiagLog, bench_bin: str, model: str,
     display: LiveDisplay, anomaly: AnomalyDetector,
+    tensor_split: str = "",
 ) -> None:
     """Section 8: Constant cache stress test."""
     log.section("8. CONSTANT CACHE STRESS TEST (fine-grained decode gradient)")
@@ -1751,7 +1765,7 @@ def section_8_stress_test(
         output, _ = run_bench(
             f"turbo3 decode @{depth} (stress)", "turbo3", "turbo3",
             f"-p 0 -n 64 -d {depth}",
-            log, bench_bin, model,
+            log, bench_bin, model, tensor_split=tensor_split,
         )
         results = parse_bench_tps(output)
         for r in results:
@@ -1766,7 +1780,7 @@ def section_8_stress_test(
         output, _ = run_bench(
             f"q8_0 decode @{depth} (stress)", "q8_0", "q8_0",
             f"-p 0 -n 64 -d {depth}",
-            log, bench_bin, model,
+            log, bench_bin, model, tensor_split=tensor_split,
         )
         results = parse_bench_tps(output)
         for r in results:
@@ -1791,6 +1805,7 @@ def section_8_stress_test(
 
 def section_9_combined(
     log: DiagLog, bench_bin: str, model: str,
+    tensor_split: str = "",
 ) -> None:
     """Section 9: Combined prefill+decode (realistic workload)."""
     log.section("9. COMBINED PREFILL+DECODE (realistic workload)")
@@ -1801,12 +1816,12 @@ def section_9_combined(
         run_bench(
             f"q8_0 pp{pp // 1024}K+tg{tg}", "q8_0", "q8_0",
             f"-pg {pp},{tg}",
-            log, bench_bin, model,
+            log, bench_bin, model, tensor_split=tensor_split,
         )
         run_bench(
             f"turbo3 pp{pp // 1024}K+tg{tg}", "turbo3", "turbo3",
             f"-pg {pp},{tg}",
-            log, bench_bin, model,
+            log, bench_bin, model, tensor_split=tensor_split,
         )
         # Mode2 for all except the last one (matches bash script)
         if (pp, tg) != COMBINED_CONFIGS[-1]:
@@ -1814,12 +1829,14 @@ def section_9_combined(
                 f"turbo3 mode2 pp{pp // 1024}K+tg{tg}", "turbo3", "turbo3",
                 f"-pg {pp},{tg}",
                 log, bench_bin, model, env_prefix=MODE2_ENV,
+                tensor_split=tensor_split,
             )
 
 
 def section_10_perplexity(
     log: DiagLog, perpl_bin: str, model: str, wiki_path: str,
     anomaly: AnomalyDetector, skip_ppl: bool = False,
+    tensor_split: str = "",
 ) -> None:
     """Section 10: Perplexity (quality validation)."""
     log.section("10. PERPLEXITY (quality validation)")
@@ -1846,7 +1863,7 @@ def section_10_perplexity(
     # q8_0 baseline
     output, _ = run_perpl(
         "q8_0 PPL (8 chunks)", "q8_0", "q8_0", 8,
-        log, perpl_bin, model, wiki_path,
+        log, perpl_bin, model, wiki_path, tensor_split=tensor_split,
     )
     ppl, stddev = parse_ppl_final(output)
     if ppl > 0:
@@ -1855,7 +1872,7 @@ def section_10_perplexity(
     # turbo3
     output, _ = run_perpl(
         "turbo3 PPL (8 chunks)", "turbo3", "turbo3", 8,
-        log, perpl_bin, model, wiki_path,
+        log, perpl_bin, model, wiki_path, tensor_split=tensor_split,
     )
     ppl_t3, _ = parse_ppl_final(output)
     if ppl_t3 > 0:
@@ -1865,6 +1882,7 @@ def section_10_perplexity(
     output, _ = run_perpl(
         "turbo3 mode2 PPL (8 chunks)", "turbo3", "turbo3", 8,
         log, perpl_bin, model, wiki_path, env_prefix=MODE2_ENV,
+        tensor_split=tensor_split,
     )
     ppl_m2, _ = parse_ppl_final(output)
     if ppl_m2 > 0:
@@ -1873,6 +1891,7 @@ def section_10_perplexity(
 
 def section_11_memory(
     log: DiagLog, cli_bin: str, model: str,
+    tensor_split: str = "",
 ) -> None:
     """Section 11: Memory breakdown."""
     log.section("11. MEMORY BREAKDOWN")
@@ -1886,6 +1905,7 @@ def section_11_memory(
     mem_keywords = [
         "KV buffer", "KV", "size", "memory_breakdown", "compute buffer",
         "RS buffer", "model buffer", "recommendedMax", "load_tensors", "offload",
+        "VRAM", "vram",
     ]
 
     for title, ctk, ctx, tag in configs:
@@ -1895,6 +1915,8 @@ def section_11_memory(
             "--cache-type-k", ctk, "--cache-type-v", ctk,
             "-c", str(ctx), "-n", "1", "-p", "test", "--jinja",
         ]
+        if tensor_split:
+            cmd.extend(["--tensor-split", tensor_split])
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             output = result.stdout + result.stderr
@@ -2195,6 +2217,15 @@ def main() -> int:
         "--output-dir", "-o", default=".",
         help="Output directory for diagnostic files (default: current directory)",
     )
+    parser.add_argument(
+        "--tensor-split", dest="tensor_split", default=None,
+        metavar="SPLIT",
+        help=(
+            "GPU tensor split for multi-GPU setups, e.g. '0.63,0.37' for "
+            "RTX 5060 Ti 16GB + RTX 3060 12GB (monitors on 3060). "
+            "Passed as -ts to llama-bench and --tensor-split to llama-cli/perplexity."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -2248,6 +2279,8 @@ def main() -> int:
     log_path = os.path.join(output_dir, f"turbo-diag-{date_str}.txt")
     monitor_path = os.path.join(output_dir, f"turbo-monitor-{date_str}.csv")
 
+    tensor_split: str = args.tensor_split or ""
+
     log = DiagLog(log_path, verbose=args.verbose)
     monitor = BackgroundMonitor(monitor_path)
     display = LiveDisplay(use_rich=HAS_RICH)
@@ -2274,6 +2307,8 @@ def main() -> int:
     log.write(f"TurboQuant Hardware Diagnostic v{DIAG_VERSION}")
     log.write(f"Output: {log_path} (human-readable log, zipped at end)")
     log.write(f"Model: {model}")
+    if tensor_split:
+        log.write(f"GPU tensor split: {tensor_split} (--tensor-split)")
     log.write("")
     log.write("NO PII is collected. Only hardware specs, load stats, and benchmarks.")
     log.write("Estimated runtime: 20-40 minutes.")
@@ -2333,32 +2368,36 @@ def main() -> int:
         gpu_init = section_4_gpu_capabilities(log, cli_bin, model)
 
         # Section 5: Build validation
-        section_5_build_validation(log, bench_bin, cli_bin, model, llama_dir)
+        section_5_build_validation(log, bench_bin, cli_bin, model, llama_dir,
+                                   tensor_split=tensor_split)
 
         # Section 6: Prefill speed
-        section_6_prefill(log, bench_bin, model, display)
+        section_6_prefill(log, bench_bin, model, display, tensor_split=tensor_split)
 
         # Section 7: Decode speed (critical)
-        section_7_decode(log, bench_bin, model, display, anomaly_detector)
+        section_7_decode(log, bench_bin, model, display, anomaly_detector,
+                         tensor_split=tensor_split)
 
         # Section 8: Stress test
         if args.skip_stress:
             log.section("8. CONSTANT CACHE STRESS TEST (fine-grained decode gradient)")
             log.write("SKIPPED: --skip-stress flag was set.")
         else:
-            section_8_stress_test(log, bench_bin, model, display, anomaly_detector)
+            section_8_stress_test(log, bench_bin, model, display, anomaly_detector,
+                                  tensor_split=tensor_split)
 
         # Section 9: Combined
-        section_9_combined(log, bench_bin, model)
+        section_9_combined(log, bench_bin, model, tensor_split=tensor_split)
 
         # Section 10: Perplexity
         section_10_perplexity(
             log, perpl_bin, model, wiki_path,
             anomaly_detector, skip_ppl=args.skip_ppl,
+            tensor_split=tensor_split,
         )
 
         # Section 11: Memory breakdown
-        section_11_memory(log, cli_bin, model)
+        section_11_memory(log, cli_bin, model, tensor_split=tensor_split)
 
         # Section 12: Post-benchmark load
         section_12_post_load(log)
