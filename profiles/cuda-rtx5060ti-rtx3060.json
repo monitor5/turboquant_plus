@@ -49,38 +49,81 @@
     "ram_used_at_idle_gb": 7.1,
     "ram_free_gb": 24.9
   },
+  "_cuda_behavior_notes": {
+    "no_constant_cache_bottleneck": true,
+    "decode_ratio_expectation": "turbo3/q8_0 should stay >= 0.90x at ALL context depths on CUDA (no Metal constant-cache degradation)",
+    "prefill_ratio_expectation": "turbo3/q8_0 should stay flat 0.98-1.00x across all depths",
+    "stress_test_note": "Section 8 stress results should show no inflection point — CUDA gather is not limited by Metal's constant cache"
+  },
   "_model_recommendations": {
-    "qwen35_27b": {
-      "recommended_quant": "Q5_K_M",
+    "qwen35_27b_q5km": {
+      "quant": "Q5_K_M",
       "quant_size_gb": 20.0,
       "fits_in_vram": true,
       "tensor_split": "0.63,0.37",
       "max_context_turbo4": 131072,
       "max_context_q8_0": 65536,
-      "kv_cache_recommendation": "turbo4",
       "kv_cache_at_32k_gb": 1.2,
       "kv_cache_at_64k_gb": 2.4,
       "kv_cache_at_128k_gb": 4.8,
+      "quantization_stacking_risk": "LOW — Q5_K_M weights are high quality; symmetric turbo should work fine",
+      "recommended_config": "-ctk turbo4 -ctv turbo4",
       "notes": [
         "Q5_K_M (~20GB) fits across both GPUs with ~4.5GB headroom for KV cache",
-        "turbo4 KV cache enables 128K context within VRAM budget",
-        "Q4_K_M (~17GB) fits on 5060 Ti alone but tight; use tensor split for stability",
-        "Q8_0 (~29GB) requires both GPUs at near-capacity; 32K context max recommended"
+        "turbo4 KV enables 128K context within the ~24.5GB VRAM budget",
+        "Q8_0 (~29GB) requires both GPUs at capacity; limit ctx to 32K"
       ]
+    },
+    "qwen35_27b_q4km": {
+      "quant": "Q4_K_M",
+      "quant_size_gb": 17.0,
+      "fits_in_vram": true,
+      "tensor_split": "0.63,0.37",
+      "quantization_stacking_risk": "MEDIUM — Q4_K_M weights + symmetric turbo KV can trigger PPL catastrophe on some models (validated on Qwen2.5-7B: PPL 6.58 → 3556 with turbo3/turbo3). Larger models appear more tolerant.",
+      "recommended_config_safe": "-ctk q8_0 -ctv turbo4",
+      "recommended_config_aggressive": "-ctk turbo4 -ctv turbo4",
+      "validation_required": true,
+      "validation_command": "llama-perplexity -m model.gguf -ngl 99 --tensor-split 0.63,0.37 -fa on -ctk turbo4 -ctv turbo4 --chunks 8 -c 512 -f wiki.test.raw",
+      "rescue_strategy": "If PPL > 10% above q8_0 baseline, switch to: -ctk q8_0 -ctv turbo4 (K stays high-precision, V gets 2x compression)"
+    }
+  },
+  "_asymmetric_kv_guidance": {
+    "discovery": "K precision is the dominant quality factor. K errors cascade through softmax exponentially. V errors are linearly proportional in the attention output.",
+    "q8_0_k_plus_turbo4_v": {
+      "description": "Safe fallback for any model weight quantization level",
+      "flags": "-ctk q8_0 -ctv turbo4",
+      "v_compression": "2.0x",
+      "expected_ppl_delta": "+0.3-1.0%",
+      "validated_on": ["Qwen2.5-7B Q4_K_M (+1.0%)", "phi-4 Q8_0 (+0.3%)"]
+    },
+    "turbo4_k_plus_turbo4_v": {
+      "description": "Symmetric compression — fine for Q5_K_M and above",
+      "flags": "-ctk turbo4 -ctv turbo4",
+      "compression": "3.8x",
+      "expected_ppl_delta": "+0.2-1.7%",
+      "validated_on": ["phi-4 Q8_0 (+1.7%)", "Qwen3.5-35B MoE Q8_0"]
+    },
+    "turbo3_k_plus_turbo3_v": {
+      "description": "Maximum compression — validate PPL before production use",
+      "flags": "-ctk turbo3 -ctv turbo3",
+      "compression": "4.6x",
+      "risk": "Higher stacking sensitivity for Q4_K_M models"
     }
   },
   "_llama_cpp_flags": {
     "all_layers_to_gpu": "-ngl 99",
     "flash_attention": "-fa on",
     "tensor_split": "--tensor-split 0.63,0.37",
-    "recommended_kv_cache": "-ctk turbo4 -ctv turbo4",
-    "example_32k_context": "llama-cli -m Qwen3.5-27B-Q5_K_M.gguf -ngl 99 -fa on --tensor-split 0.63,0.37 -ctk turbo4 -ctv turbo4 -c 32768",
-    "example_128k_context": "llama-cli -m Qwen3.5-27B-Q5_K_M.gguf -ngl 99 -fa on --tensor-split 0.63,0.37 -ctk turbo4 -ctv turbo4 -c 131072"
+    "q5km_normal": "llama-cli -m Qwen3.5-27B-Q5_K_M.gguf -ngl 99 -fa on --tensor-split 0.63,0.37 -ctk turbo4 -ctv turbo4 -c 32768",
+    "q5km_max_context": "llama-cli -m Qwen3.5-27B-Q5_K_M.gguf -ngl 99 -fa on --tensor-split 0.63,0.37 -ctk turbo4 -ctv turbo4 -c 131072",
+    "q4km_safe": "llama-cli -m Qwen3.5-27B-Q4_K_M.gguf -ngl 99 -fa on --tensor-split 0.63,0.37 -ctk q8_0 -ctv turbo4 -c 65536",
+    "server_mode": "llama-server -m Qwen3.5-27B-Q5_K_M.gguf -ngl 99 -fa on --tensor-split 0.63,0.37 -ctk turbo4 -ctv turbo4 -c 65536 --port 8080"
   },
   "_build_instructions": {
     "cmake_cuda": "cmake -B build -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release",
     "cmake_build": "cmake --build build -j$(nproc)",
-    "cuda_arch_hint": "GGML_CUDA_FORCE_MMQ=1 may help on Ada/Blackwell (5060 Ti) + Ampere (3060) mixed setups"
+    "cuda_arch_note": "On mixed Blackwell(sm_100) + Ampere(sm_86), cmake will compile for both automatically",
+    "cuda_mmq_hint": "GGML_CUDA_FORCE_MMQ=1 can improve throughput for batch=1 inference on this mixed setup"
   },
   "model": {
     "filename": "",

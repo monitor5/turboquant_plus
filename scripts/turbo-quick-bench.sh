@@ -60,14 +60,16 @@ echo "  Date:  $(date -u +%Y-%m-%d\ %H:%M\ UTC)"
 echo "========================================"
 echo ""
 
-# Known good values (Qwen3.5-35B-A3B Q8_0 on M5 Max)
-# Update these if you change reference model
+# Known good PPL values (Qwen3.5-35B-A3B Q8_0 on M5 Max — Apple Silicon only)
+# On CUDA hardware, hardware-specific speed refs don't apply.
+# PPL refs are model-dependent (not hardware-dependent) so they stay valid across platforms.
+# Speed refs are only meaningful for M5 Max — pass --no-ref on CUDA to skip speed judgment.
 REF_PPL_Q8="6.11"
 REF_PPL_T3="6.18"
 REF_PPL_T4="6.13"
-REF_DEC_Q8="86"
-REF_DEC_T3="77"
-REF_DEC_T4="80"
+REF_DEC_Q8="86"   # M5 Max tok/s — irrelevant on CUDA, use --no-ref to skip
+REF_DEC_T3="77"   # M5 Max tok/s — irrelevant on CUDA
+REF_DEC_T4="80"   # M5 Max tok/s — irrelevant on CUDA
 
 PASS=0
 WARN=0
