@@ -1277,9 +1277,10 @@ class TestPackaging:
 class TestGracefulDegradation:
     """System survives when probes and tools are missing."""
 
-    def test_missing_nvidia_smi_warning(self, tmp_path):
+    @patch("turbo_hardware_diag.subprocess.check_output", side_effect=FileNotFoundError("nvidia-smi"))
+    def test_missing_nvidia_smi_warning(self, _mock_check_output):
+        """When nvidia-smi is absent or cannot run, _nvidia_query returns N/A (any host)."""
         result = thd.BackgroundMonitor._nvidia_query("temperature.gpu")
-        # On macOS (where these tests actually run), nvidia-smi doesn't exist
         assert result == "N/A"
 
     @patch("turbo_hardware_diag._run_cmd", return_value="")
